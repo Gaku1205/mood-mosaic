@@ -86,6 +86,27 @@ export function countRecorded(records: Record<string, string>, today: DayRef): n
   return n;
 }
 
+/** その年に記録が1つでもあるか */
+export function hasRecordsInYear(records: Record<string, string>, year: number): boolean {
+  return Object.keys(records).some((key) => parseDateKey(key)?.year === year);
+}
+
+/**
+ * 表示している年の記録の数。今年は「今日までの記録 / 1月1日から今日までの日数」、
+ * 過去の年は「その年の記録 / その年の日数」
+ */
+export function yearCount(
+  records: Record<string, string>,
+  year: number,
+  today: DayRef,
+): { recorded: number; total: number } {
+  if (year === today.year) {
+    return { recorded: countRecorded(records, today), total: dayOfYear(today) };
+  }
+  const recorded = Object.keys(records).filter((key) => parseDateKey(key)?.year === year).length;
+  return { recorded, total: dayOfYear({ year, month: 12, day: 31 }) };
+}
+
 /** 前の日（年をまたがない。1月1日なら null） */
 export function previousDay(ref: DayRef): DayRef | null {
   if (ref.day > 1) return { ...ref, day: ref.day - 1 };

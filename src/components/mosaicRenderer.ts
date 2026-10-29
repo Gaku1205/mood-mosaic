@@ -8,7 +8,16 @@ import {
   cellRect,
   gridShape,
 } from "@/lib/mosaic";
-import { createGlProgram, sizeCanvas } from "./gl";
+import {
+  APPEAR_MS,
+  APPEAR_STEP_MS,
+  RIPPLE_DOWN_MS,
+  RIPPLE_LIFT,
+  RIPPLE_REACH,
+  RIPPLE_STEP_MS,
+  RIPPLE_UP_MS,
+} from "@/lib/motion";
+import { GLSL_EASE, GLSL_OKLCH, createGlProgram, sizeCanvas } from "./gl";
 
 /** 1回分の描く内容（座標は CSS px） */
 export interface MosaicScene {
@@ -27,6 +36,10 @@ export interface MosaicScene {
   selected: CellIndex | null;
   /** 読み込み中の `--blank` から色へ（0〜1） */
   load: number;
+  /** マスの出現が始まってからの時間（ms）。出現しないときは null */
+  appear: number | null;
+  /** 波紋が始まってからの時間（ms）。波紋が無いときは null */
+  ripple: number | null;
 }
 
 export interface MosaicRenderer {
@@ -44,8 +57,17 @@ const BLANK = rgbOf(PALETTE.blank);
 const INK = rgbOf(PALETTE.ink);
 const SEAM = rgbOf(PALETTE.seam);
 
+/** GLSL の float の書き方（`12` → `12.0`） */
+function f(n: number): string {
+  return Number.isInteger(n) ? `${n}.0` : String(n);
+}
+
 const FRAGMENT = `
 precision highp float;
+${GLSL_OKLCH}
+${GLSL_EASE}
+uniform float u_appear;
+uniform float u_ripple;
 uniform vec2 u_res;
 uniform vec4 u_frame;
 uniform float u_dpr;
@@ -75,10 +97,35 @@ bool same(vec2 a, vec2 b) {
   return abs(a.x - b.x) < 0.5 && abs(a.y - b.y) < 0.5;
 }
 
+// src/lib/motion.ts の appearOpacity と同じ
+float appearOpacity(vec2 dm) {
+  if (u_appear < 0.0) return 1.0;
+  return easeOut((u_appear - (dm.x + dm.y) * ${f(APPEAR_STEP_MS)}) / ${f(APPEAR_MS)});
+}
+
+// src/lib/motion.ts の rippleLift と同じ
+float rippleLift(vec2 dm) {
+  if (u_ripple < 0.0) return 0.0;
+  float dist = length(dm - u_today);
+  if (dist <= 0.0 || dist > ${f(RIPPLE_REACH)}) return 0.0;
+  float t = u_ripple - dist * ${f(RIPPLE_STEP_MS)};
+  if (t <= 0.0) return 0.0;
+  if (t < ${f(RIPPLE_UP_MS)}) return ${f(RIPPLE_LIFT)} * easeOut(t / ${f(RIPPLE_UP_MS)});
+  float back = (t - ${f(RIPPLE_UP_MS)}) / ${f(RIPPLE_DOWN_MS)};
+  if (back >= 1.0) return 0.0;
+  return ${f(RIPPLE_LIFT)} * (1.0 - easeOut(back));
+}
+
 vec3 cellColor(vec2 dm) {
   vec3 c = texture2D(u_tex, vec2((dm.x + 0.5) / 31.0, (dm.y + 0.5) / 12.0)).rgb;
   if (same(dm, u_today)) c = u_todayColor;
-  return mix(u_blank, c, u_load);
+  c = mix(u_blank, c, u_load);
+  float lift = rippleLift(dm);
+  if (lift > 0.0) {
+    vec3 lab = rgbToOklab(c);
+    c = oklabToRgb(lab.x + lift, lab.y, lab.z);
+  }
+  return c;
 }
 
 void main() {
@@ -93,7 +140,7 @@ void main() {
 
   if (!inside) {
     dm.x = min(dm.x, len - 1.0);
-    gl_FragColor = vec4(cellColor(dm) * u_outside, 1.0);
+    gl_FragColor = vec4(mix(u_night, cellColor(dm) * u_outside, appearOpacity(dm)), 1.0);
     return;
   }
   if (dm.x >= len) {
@@ -111,7 +158,7 @@ void main() {
   if (same(dm, u_today) && u_todayRing > 0.5 && edge < 1.5 * u_dpr) c = u_ink;
   if (same(dm, u_selected) && edge < 1.5 * u_dpr) c = u_ink;
   if (same(dm, u_focus) && edge < 2.0 * u_dpr) c = u_ink;
-  gl_FragColor = vec4(c, 1.0);
+  gl_FragColor = vec4(mix(u_night, c, appearOpacity(dm)), 1.0);
 }
 `;
 
@@ -167,6 +214,8 @@ function createWebGl(canvas: HTMLCanvasElement): MosaicRenderer | null {
       gl.uniform2fv(prog.uniform("u_focus"), cellVec(s.focus));
       gl.uniform2fv(prog.uniform("u_selected"), cellVec(s.selected));
       gl.uniform1f(prog.uniform("u_load"), s.load);
+      gl.uniform1f(prog.uniform("u_appear"), s.appear ?? -1);
+      gl.uniform1f(prog.uniform("u_ripple"), s.ripple ?? -1);
       prog.drawFullscreen();
     },
     destroy() {

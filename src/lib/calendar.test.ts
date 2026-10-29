@@ -7,9 +7,11 @@ import {
   dayStatus,
   daysInMonth,
   formatMonthDay,
+  hasRecordsInYear,
   localToday,
   moveDay,
   parseDateKey,
+  yearCount,
 } from "./calendar";
 
 const today = { year: 2026, month: 10, day: 29 };
@@ -141,6 +143,41 @@ describe("moveDay", () => {
     expect(moveDay(jan1, "ArrowUp", today)).toEqual(jan1);
     expect(moveDay(today, "ArrowRight", today)).toEqual(today);
     expect(moveDay({ year: 2026, month: 9, day: 30 }, "ArrowDown", today)).toEqual(today);
+  });
+
+  it("過去の年は12月31日まで動け、年はまたがない", () => {
+    const dec31 = { year: 2025, month: 12, day: 31 };
+    expect(moveDay({ year: 2025, month: 12, day: 30 }, "ArrowRight", today)).toEqual(dec31);
+    expect(moveDay(dec31, "ArrowRight", today)).toEqual(dec31);
+    expect(moveDay(dec31, "ArrowDown", today)).toEqual(dec31);
+  });
+});
+
+describe("hasRecordsInYear", () => {
+  it("その年の記録があるときだけ true", () => {
+    const records = { "2025-03-14": "#112233", "2026-01-01": "#445566" };
+    expect(hasRecordsInYear(records, 2025)).toBe(true);
+    expect(hasRecordsInYear(records, 2024)).toBe(false);
+    expect(hasRecordsInYear({}, 2025)).toBe(false);
+  });
+});
+
+describe("yearCount", () => {
+  const records = {
+    "2025-03-14": "#112233",
+    "2025-12-31": "#112233",
+    "2026-01-01": "#445566",
+    "2026-10-29": "#445566",
+    "2026-11-01": "#445566",
+  };
+
+  it("今年は今日までの記録 / 1月1日から今日までの日数", () => {
+    expect(yearCount(records, 2026, today)).toEqual({ recorded: 2, total: 302 });
+  });
+
+  it("過去の年はその年の記録 / その年の日数", () => {
+    expect(yearCount(records, 2025, today)).toEqual({ recorded: 2, total: 365 });
+    expect(yearCount(records, 2024, today)).toEqual({ recorded: 0, total: 366 });
   });
 });
 

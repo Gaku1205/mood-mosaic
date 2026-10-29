@@ -301,6 +301,29 @@ button {
   pointer-events: none;
 }
 
+/* 過去のマスの札の点線：札からマスへ伸びる */
+.card-line--grow {
+  transform-origin: top;
+  animation: line-grow 180ms var(--ease) both;
+}
+
+@keyframes line-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+/* 2.4 秒たった札と点線は 160ms で消える */
+.card,
+.card-line,
+.m-card {
+  transition: opacity 160ms linear;
+}
+
+.is-fading {
+  opacity: 0;
+}
+
 .swatch {
   display: inline-block;
   width: 10px;
@@ -313,6 +336,25 @@ button {
   display: flex;
   align-items: baseline;
   gap: 16px;
+}
+
+.years {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.year-button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.year-button:active {
+  transform: scale(0.97);
 }
 
 .count {
@@ -431,12 +473,28 @@ button {
   position: fixed;
   inset: 0;
   z-index: 10;
+}
+
+/* ばねで開閉しないとき（動きを減らす・WebGL が無い）は 120ms の透明度の切り替え */
+.field[data-motion="fade"] {
   animation: field-in 120ms linear;
   transition: opacity 120ms linear;
 }
 
-.field.is-closing {
+.field[data-motion="fade"].is-closing {
   opacity: 0;
+}
+
+.field.is-closing {
+  pointer-events: none;
+}
+
+/* 開くとき・残すときに一面に重ねる色（溶け込み） */
+.field-blend {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .field:focus-visible {
@@ -471,13 +529,9 @@ button {
   box-sizing: border-box;
   border: 2px solid var(--ink);
   border-radius: 50%;
+  /* 大きさはばねで動かす（ColorField） */
   transform: translate(-50%, -50%) scale(1);
-  transition: transform 120ms var(--ease);
   pointer-events: none;
-}
-
-.field-ring.is-pressed {
-  transform: translate(-50%, -50%) scale(1.25);
 }
 
 .field:focus-visible .field-ring {
@@ -517,13 +571,5 @@ button {
 
   .glass-bg--foot {
     mask-image: linear-gradient(to top, var(--night) calc(100% - 16px), transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .field-ring,
-  .field-ring.is-pressed {
-    transform: translate(-50%, -50%);
-    transition: none;
   }
 }

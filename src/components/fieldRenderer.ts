@@ -3,6 +3,7 @@ import { GLSL_OKLCH, createGlProgram, sizeCanvas } from "./gl";
 
 /** 色の場：横（x 0→1）が色相 0°→360°、縦（y 0→1）で L = 0.92 − 0.62y、C = 0.16 × (1 − y²) */
 export interface FieldRenderer {
+  kind: "webgl" | "2d";
   draw(width: number, height: number, dpr: number): void;
   destroy(): void;
 }
@@ -23,6 +24,7 @@ function createWebGl(canvas: HTMLCanvasElement): FieldRenderer | null {
   const prog = createGlProgram(canvas, FRAGMENT);
   if (!prog) return null;
   return {
+    kind: "webgl",
     draw(width, height, dpr) {
       sizeCanvas(canvas, width, height, dpr);
       prog.gl.uniform2f(prog.uniform("u_res"), canvas.width, canvas.height);
@@ -42,6 +44,7 @@ function create2d(canvas: HTMLCanvasElement): FieldRenderer | null {
   const smallCtx = small.getContext("2d");
   if (!smallCtx) return null;
   return {
+    kind: "2d",
     draw(width, height, dpr) {
       sizeCanvas(canvas, width, height, dpr);
       const w = Math.max(1, Math.round(canvas.width / 4));
