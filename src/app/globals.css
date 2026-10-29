@@ -1,17 +1,529 @@
+/* 色は docs/design.md の6つだけ */
 :root {
-  --bg: #0a0a0b;
-  --text: #dedfe3;
+  --night: #0f0e13;
+  --blank: #1d1c24;
+  --seam: rgba(244, 242, 255, 0.08);
+  --ink: #f2f0f7;
+  --ink-dim: #8e8a9c;
+  --glass: rgba(15, 14, 19, 0.42);
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: system-ui, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--night);
+  color: var(--ink);
+  font-family: var(--font-plex), sans-serif;
+  font-weight: 400;
+  word-break: auto-phrase;
+  -webkit-font-smoothing: antialiased;
 }
 
-.container {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 48px 20px;
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- 文字の段 ---- */
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.t-count {
+  font-family: var(--font-bricolage), sans-serif;
+  font-weight: 800;
+  font-size: 56px;
+  line-height: 44px;
+  letter-spacing: -0.03em;
+}
+
+.t-heading {
+  font-family: var(--font-bricolage), sans-serif;
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 24px;
+  letter-spacing: -0.01em;
+}
+
+.t-body {
+  font-family: var(--font-plex), sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.t-small {
+  font-family: var(--font-plex), sans-serif;
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+}
+
+.t-small .num,
+.t-small.num {
+  font-family: var(--font-bricolage), sans-serif;
+  font-weight: 600;
+}
+
+.dim {
+  color: var(--ink-dim);
+}
+
+/* ---- 画面の骨組み ---- */
+
+.app {
+  /* 枠（マスを並べる範囲）の余白。PC */
+  --ft: 72px;
+  --fl: 56px;
+  --fr: 24px;
+  --fb: 24px;
+  --card-w: 88px;
+  --card-bottom: 52px;
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  margin: 0;
+}
+
+@media (max-width: 767.98px) {
+  .app {
+    --ft: 84px;
+    --fl: 12px;
+    --fr: 12px;
+    --fb: calc(76px + env(safe-area-inset-bottom));
+  }
+}
+
+.mosaic-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.grid {
+  position: absolute;
+  z-index: 2;
+  top: var(--ft);
+  left: var(--fl);
+  right: var(--fr);
+  bottom: var(--fb);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* マスのフォーカスはシェーダーでマスの内側に描く */
+.grid:focus-visible {
+  outline: none;
+}
+
+/* 背景の名前。モザイクに溶ける */
+.name {
+  position: absolute;
+  z-index: 1;
+  left: 24px;
+  bottom: 16px;
+  margin: 0;
+  font-family: var(--font-bricolage), sans-serif;
+  font-weight: 800;
+  font-size: clamp(120px, 19vw, 420px);
+  line-height: 0.8;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  user-select: none;
+}
+
+.name span {
+  display: block;
+}
+
+@media (max-width: 767.98px) {
+  .name {
+    left: 2vw;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    font-size: 17vw;
+    white-space: nowrap;
+  }
+
+  .name span {
+    display: inline;
+  }
+}
+
+/* ---- すりガラスの帯 ---- */
+
+.band {
+  position: absolute;
+  z-index: 3;
+}
+
+.glass-bg {
+  position: absolute;
+  inset: 0;
+  background: var(--glass);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+}
+
+.glass-bg--down {
+  mask-image: linear-gradient(to bottom, var(--night) calc(100% - 16px), transparent);
+}
+
+.glass-bg--up {
+  mask-image: linear-gradient(to top, var(--night) calc(100% - 16px), transparent);
+}
+
+.glass-bg--right {
+  mask-image: linear-gradient(to right, var(--night) calc(100% - 16px), transparent);
+}
+
+.glass-bg--corner {
+  mask-image:
+    linear-gradient(to right, var(--night) calc(100% - 16px), transparent),
+    linear-gradient(to bottom, var(--night) calc(100% - 16px), transparent);
+  mask-composite: intersect;
+}
+
+.glass-bg--foot {
+  mask-image:
+    linear-gradient(to left, var(--night) calc(100% - 16px), transparent),
+    linear-gradient(to top, var(--night) calc(100% - 16px), transparent);
+  mask-composite: intersect;
+}
+
+.band-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 72px;
+}
+
+.band-left {
+  top: var(--ft);
+  bottom: var(--fb);
+  left: 0;
+  width: 56px;
+}
+
+/* ---- PC の文字 ---- */
+
+.day-number,
+.month-label,
+.m-month,
+.card,
+.card-line,
+.pc-right,
+.m-today-mark {
+  position: absolute;
+  z-index: 4;
+}
+
+.day-number {
+  top: 54px;
+  height: 16px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.month-label {
+  left: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.card {
+  top: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  min-width: var(--card-w);
+  min-height: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+}
+
+.card-button {
+  cursor: pointer;
+}
+
+.card-button:active > * {
+  transform: scale(0.97);
+}
+
+.card-button > * {
+  transform-origin: left center;
+}
+
+.card-line {
+  top: var(--card-bottom);
+  width: 1px;
+  margin-left: -0.5px;
+  background: repeating-linear-gradient(to bottom, var(--ink-dim) 0 2px, transparent 2px 5px);
+  pointer-events: none;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+}
+
+.pc-right {
+  top: 4px;
+  right: var(--fr);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+/* ---- スマホ ---- */
+
+@media (max-width: 767.98px) {
+  .band-top {
+    height: 84px;
+  }
+
+  .t-count {
+    font-size: 40px;
+    line-height: 40px;
+  }
+}
+
+.m-card {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.m-right {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+}
+
+.m-month {
+  top: 64px;
+  height: 20px;
+  line-height: 20px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.m-today-mark {
+  left: calc(var(--fl) - 8px);
+  width: 8px;
+  height: 1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+
+.band-bottom {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(76px + env(safe-area-inset-bottom));
+  padding: 0 12px env(safe-area-inset-bottom);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.band-bottom > :not(.glass-bg),
+.field-foot > :not(.glass-bg),
+.field-head > :not(.glass-bg) {
+  position: relative;
+}
+
+/* ---- ボタン ---- */
+
+.fill-button {
+  height: 48px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.paint-button {
+  background: var(--ink);
+  color: var(--night);
+}
+
+.text-button {
+  height: 48px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.text-button.cancel {
+  color: var(--ink-dim);
+}
+
+.text-button.cancel:focus-visible {
+  text-decoration: underline;
+}
+
+.text-button.retry {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.fill-button:active,
+.text-button:active {
+  transform: scale(0.97);
+}
+
+/* ---- 色の場 ---- */
+
+.field {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  animation: field-in 120ms linear;
+  transition: opacity 120ms linear;
+}
+
+.field.is-closing {
+  opacity: 0;
+}
+
+.field:focus-visible {
+  outline: none;
+}
+
+@keyframes field-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.field-surface {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.field-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.field-ring {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(1);
+  transition: transform 120ms var(--ease);
+  pointer-events: none;
+}
+
+.field-ring.is-pressed {
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.field:focus-visible .field-ring {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.field-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+}
+
+.field-foot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  height: 80px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 0 24px;
+}
+
+@media (max-width: 767.98px) {
+  .field-foot {
+    left: 0;
+    height: calc(76px + env(safe-area-inset-bottom));
+    padding: 0 12px env(safe-area-inset-bottom);
+  }
+
+  .glass-bg--foot {
+    mask-image: linear-gradient(to top, var(--night) calc(100% - 16px), transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-ring,
+  .field-ring.is-pressed {
+    transform: translate(-50%, -50%);
+    transition: none;
+  }
 }
