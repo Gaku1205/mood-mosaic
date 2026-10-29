@@ -11,24 +11,29 @@ import {
 import {
   type DayRef,
   type MoveKey,
-  countRecorded,
   dateKey,
-  dayOfYear,
   dayStatus,
   formatMonthDay,
+  hasRecordsInYear,
   moveDay,
   parseDateKey,
   previousDay,
+  yearCount,
 } from "@/lib/calendar";
-import { DEFAULT_FIELD_POINT, type FieldPoint, hexToFieldPoint, textColorOn } from "@/lib/color";
-import { cellAtPoint, toCellIndex, toDayRef } from "@/lib/mosaic";
+import {
+  DEFAULT_FIELD_POINT,
+  type FieldPoint,
+  hexToFieldPoint,
+  rgbToHex,
+  textColorOn,
+} from "@/lib/color";
+import { cellAtPoint, cellRect, toCellIndex, toDayRef, todayCellColor } from "@/lib/mosaic";
+import { type Box, CARD_FADE_MS, CARD_MS } from "@/lib/motion";
 import type { Records } from "@/lib/storage";
 import { ColorField } from "./ColorField";
 import { MosaicCanvas } from "./MosaicCanvas";
 import { recordStore, useIsMobile, useReducedMotion, useRecords, useTodayKey } from "./stores";
 
-/** 過去のマスの札を出しておく長さ（ms） */
-const CARD_MS = 2400;
 const MOVE_KEYS: readonly string[] = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
 
 /** 枠の中の横の位置（0〜1）→ CSS の left */
@@ -46,6 +51,11 @@ function initialFieldPoint(records: Records, today: DayRef): FieldPoint {
   const prev = previousDay(today);
   const hex = records[dateKey(today)] ?? (prev ? records[dateKey(prev)] : undefined);
   return (hex && hexToFieldPoint(hex)) || DEFAULT_FIELD_POINT;
+}
+
+/** 今この瞬間の今日のマスの色（MosaicCanvas と同じ performance.now() の時計） */
+function todayColorNow(todayHex: string | null, still: boolean): string {
+  return rgbToHex(todayCellColor(performance.now() / 1000, todayHex, still).rgb);
 }
 
 /** ページ全体。今日が決まる（ブラウザで読み込む）までは背景の名前だけを出す */
@@ -69,22 +79,31 @@ function MosaicPage({ today }: { today: DayRef }) {
   const gridRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
-  const cardTimer = useRef<number | undefined>(undefined);
+  const cardTimers = useRef<number[]>([]);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [focus, setFocus] = useState<DayRef | null>(null);
   const [focusVisible, setFocusVisible] = useState(false);
   const [selected, setSelected] = useState<DayRef | null>(null);
-  const [fieldOpen, setFieldOpen] = useState(false);
+  const [cardFading, setCardFading] = useState(false);
+  /** 札を出し直すたびに増やす（点線をもう一度伸ばすため） */
+  const [cardSerial, setCardSerial] = useState(0);
+  const [field, setField] = useState<{ originColor: string } | null>(null);
+  const [rippleAt, setRippleAt] = useState<number | null>(null);
+  const [viewingPrev, setViewingPrev] = useState(false);
 
   const todayKey = dateKey(today);
   const todayHex = records?.[todayKey] ?? null;
+  const prevYear = today.year - 1;
+  const hasPrev = records !== null && hasRecordsInYear(records, prevYear);
+  const year = viewingPrev && hasPrev ? prevYear : today.year;
+  const isThisYear = year === today.year;
+  const lastDay: DayRef = isThisYear ? today : { year, month: 12, day: 31 };
   const current =
-    focus && focus.year === today.year && dayStatus(focus, today) !== "future" ? focus : today;
-  const recorded = countRecorded(records ?? {}, today);
-  const total = dayOfYear(today);
+    focus && focus.year === year && dayStatus(focus, today) !== "future" ? focus : lastDay;
+  const { recorded, total } = yearCount(records ?? {}, year, today);
   const paintLabel = todayHex ? "塗り直す" : "今日を塗る";
 
-  useEffect(() => () => window.clearTimeout(cardTimer.current), []);
+  useEffect(() => () => cardTimers.current.forEach((id) => window.clearTimeout(id)), []);
 
   // 右上の数の幅を CSS に渡す（今日の札が重ならないように）
   useEffect(() => {
@@ -98,23 +117,58 @@ function MosaicPage({ today }: { today: DayRef }) {
     return () => observer.disconnect();
   }, [mobile]);
 
+  function clearCardTimers() {
+    cardTimers.current.forEach((id) => window.clearTimeout(id));
+    cardTimers.current = [];
+  }
+
+  function hideCard() {
+    clearCardTimers();
+    setSelected(null);
+    setCardFading(false);
+  }
+
   function showCard(ref: DayRef) {
+    clearCardTimers();
     setSelected(ref);
-    window.clearTimeout(cardTimer.current);
-    cardTimer.current = window.setTimeout(() => setSelected(null), CARD_MS);
+    setCardFading(false);
+    setCardSerial((n) => n + 1);
+    cardTimers.current = [
+      window.setTimeout(() => setCardFading(true), CARD_MS),
+      window.setTimeout(() => {
+        setSelected(null);
+        setCardFading(false);
+      }, CARD_MS + CARD_FADE_MS),
+    ];
+  }
+
+  /** 今日のマスの長方形（画面の座標） */
+  function todayRect(): Box | null {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const box = grid.getBoundingClientRect();
+    const frame = { x: box.left, y: box.top, width: box.width, height: box.height };
+    return cellRect(frame, mobile, toCellIndex(today));
   }
 
   function openField() {
+    if (!isThisYear) return;
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    window.clearTimeout(cardTimer.current);
-    setSelected(null);
-    setFieldOpen(true);
+    hideCard();
+    setField({ originColor: todayColorNow(todayHex, reducedMotion) });
   }
 
-  function closeField() {
-    setFieldOpen(false);
+  function closeField(saved: boolean) {
+    setField(null);
+    if (saved) setRippleAt(performance.now());
     const el = returnFocus.current;
     window.setTimeout(() => el?.focus(), 0);
+  }
+
+  function switchYear(next: number) {
+    hideCard();
+    setFocus(null);
+    setViewingPrev(next !== today.year);
   }
 
   function activate(ref: DayRef) {
@@ -126,8 +180,8 @@ function MosaicPage({ today }: { today: DayRef }) {
   function dayAt(e: MouseEvent<HTMLElement>): DayRef | null {
     const box = e.currentTarget.getBoundingClientRect();
     const frame = { x: box.left, y: box.top, width: box.width, height: box.height };
-    const cell = cellAtPoint(frame, mobile, today.year, e.clientX, e.clientY);
-    return cell ? toDayRef(today.year, cell) : null;
+    const cell = cellAtPoint(frame, mobile, year, e.clientX, e.clientY);
+    return cell ? toDayRef(year, cell) : null;
   }
 
   function onGridPointerDown(e: PointerEvent<HTMLDivElement>) {
@@ -159,6 +213,7 @@ function MosaicPage({ today }: { today: DayRef }) {
     return recordStore.save(todayKey, hex);
   }
 
+  const fading = cardFading ? " is-fading" : "";
   const selectedHex = selected ? records?.[dateKey(selected)] : undefined;
   const pastCardBody = (
     <>
@@ -182,25 +237,48 @@ function MosaicPage({ today }: { today: DayRef }) {
       </span>
     </span>
   );
+  const yearItem = (y: number) =>
+    y === year ? (
+      <span key={y} className="t-heading num" aria-current={hasPrev ? "true" : undefined}>
+        {y}
+      </span>
+    ) : (
+      <button
+        key={y}
+        type="button"
+        className="year-button t-heading num dim"
+        onClick={() => switchYear(y)}
+      >
+        {y}
+      </button>
+    );
+  const years = (
+    <span className="years">
+      {hasPrev && yearItem(prevYear)}
+      {yearItem(today.year)}
+    </span>
+  );
 
   return (
     <>
-      <div className="layer" ref={layerRef} inert={fieldOpen}>
+      <div className="layer" ref={layerRef} inert={field !== null}>
         <MosaicCanvas
           frameRef={gridRef}
           today={today}
+          year={year}
           records={records}
           mobile={mobile}
           reducedMotion={reducedMotion}
           focus={focusVisible ? toCellIndex(current) : null}
           selected={selected ? toCellIndex(selected) : null}
+          rippleAt={rippleAt}
         />
 
         <div
           ref={gridRef}
           className="grid"
           role="grid"
-          aria-label={`${today.year}年の気分`}
+          aria-label={`${year}年の気分`}
           tabIndex={0}
           onPointerDown={onGridPointerDown}
           onClick={onGridClick}
@@ -216,15 +294,15 @@ function MosaicPage({ today }: { today: DayRef }) {
           <>
             <div className="band band-top">
               <div className="glass-bg glass-bg--down" />
-              <div className="m-card">
-                {selected ? (
-                  pastCardBody
-                ) : (
-                  <>
-                    <span className="t-heading num">{formatMonthDay(today)}</span>
-                    <span className="t-small">今日</span>
-                  </>
-                )}
+              <div className={`m-card${selected ? fading : ""}`}>
+                {selected
+                  ? pastCardBody
+                  : isThisYear && (
+                      <>
+                        <span className="t-heading num">{formatMonthDay(today)}</span>
+                        <span className="t-small">今日</span>
+                      </>
+                    )}
               </div>
               <div className="m-right" ref={rightRef}>
                 {countBlock}
@@ -233,28 +311,32 @@ function MosaicPage({ today }: { today: DayRef }) {
             {Array.from({ length: 12 }, (_, m) => (
               <span
                 key={m}
-                className={`m-month t-small num${m + 1 === today.month ? "" : " dim"}`}
+                className={`m-month t-small num${isThisYear && m + 1 === today.month ? "" : " dim"}`}
                 style={{ left: colX((m + 0.5) / 12) }}
               >
                 {m + 1}
               </span>
             ))}
-            <span className="m-today-mark" style={{ top: rowY((today.day - 1) / 31) }} />
+            {isThisYear && (
+              <span className="m-today-mark" style={{ top: rowY((today.day - 1) / 31) }} />
+            )}
             <div className="band band-bottom">
               <div className="glass-bg glass-bg--up" />
-              <span className="t-heading num">{today.year}</span>
-              <button
-                type="button"
-                className="fill-button paint-button t-body"
-                style={
-                  todayHex
-                    ? { background: todayHex, color: textColorOn(todayHex) }
-                    : undefined
-                }
-                onClick={openField}
-              >
-                {paintLabel}
-              </button>
+              {years}
+              {isThisYear && (
+                <button
+                  type="button"
+                  className="fill-button paint-button t-body"
+                  style={
+                    todayHex
+                      ? { background: todayHex, color: textColorOn(todayHex) }
+                      : undefined
+                  }
+                  onClick={openField}
+                >
+                  {paintLabel}
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -266,7 +348,7 @@ function MosaicPage({ today }: { today: DayRef }) {
               <div className="glass-bg glass-bg--right" />
             </div>
             {Array.from({ length: 31 }, (_, d) =>
-              d + 1 === today.day ? null : (
+              isThisYear && d + 1 === today.day ? null : (
                 <span
                   key={d}
                   className="day-number t-small num dim"
@@ -279,50 +361,65 @@ function MosaicPage({ today }: { today: DayRef }) {
             {Array.from({ length: 12 }, (_, m) => (
               <span
                 key={m}
-                className={`month-label t-small${m + 1 === today.month ? "" : " dim"}`}
+                className={`month-label t-small${isThisYear && m + 1 === today.month ? "" : " dim"}`}
                 style={{ top: rowY((m + 0.5) / 12) }}
               >
                 <span className="num">{m + 1}</span>月
               </span>
             ))}
             {selected ? (
-              <div className="card" style={{ left: cardLeft(selected.day) }}>
-                {pastCardBody}
-              </div>
-            ) : (
               <>
-                <button
-                  type="button"
-                  className="card card-button"
-                  style={{ left: cardLeft(today.day) }}
-                  onClick={openField}
-                >
-                  <span className="t-heading num">{formatMonthDay(today)}</span>
-                  <span className="t-small">{paintLabel}</span>
-                </button>
+                <div className={`card${fading}`} style={{ left: cardLeft(selected.day) }}>
+                  {pastCardBody}
+                </div>
                 <span
-                  className="card-line"
+                  key={cardSerial}
+                  className={`card-line card-line--grow${fading}`}
                   style={{
-                    left: colX((today.day - 0.5) / 31),
-                    height: `calc(${rowY((today.month - 1) / 12)} - var(--card-bottom))`,
+                    left: colX((selected.day - 0.5) / 31),
+                    height: `calc(${rowY((selected.month - 1) / 12)} - var(--card-bottom))`,
                   }}
                 />
               </>
+            ) : (
+              isThisYear && (
+                <>
+                  <button
+                    type="button"
+                    className="card card-button"
+                    style={{ left: cardLeft(today.day) }}
+                    onClick={openField}
+                  >
+                    <span className="t-heading num">{formatMonthDay(today)}</span>
+                    <span className="t-small">{paintLabel}</span>
+                  </button>
+                  <span
+                    className="card-line"
+                    style={{
+                      left: colX((today.day - 0.5) / 31),
+                      height: `calc(${rowY((today.month - 1) / 12)} - var(--card-bottom))`,
+                    }}
+                  />
+                </>
+              )
             )}
             <div className="pc-right" ref={rightRef}>
               {countBlock}
-              <span className="t-heading num">{today.year}</span>
+              {years}
             </div>
           </>
         )}
       </div>
 
-      {fieldOpen && (
+      {field && (
         <ColorField
           dateLabel={formatMonthDay(today)}
           initialPoint={initialFieldPoint(records ?? {}, today)}
           onSave={saveToday}
           onClosed={closeField}
+          reducedMotion={reducedMotion}
+          getOrigin={todayRect}
+          originColor={field.originColor}
         />
       )}
     </>
